@@ -110,5 +110,6 @@ jobs:
             ### Usage
             ```bash
             tar -xzf nvchad-offline.tar.gz
+            cd nvchad-offline
             ./install.sh
             ```

@@ -1,11 +1,30 @@
 #!/bin/bash
 # NvChad Offline Installation Script
-# Run this script in the offline environment
+# Run this script from inside the extracted nvchad-offline directory
 
 set -e
 
+# Handle being run from inside nvchad-offline/ or from parent directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OFFLINE_DIR="${SCRIPT_DIR}/nvchad-offline"
+
+if [ -d "$SCRIPT_DIR/lazy-plugins" ]; then
+    # Running from inside nvchad-offline/
+    OFFLINE_DIR="$SCRIPT_DIR"
+else
+    # Running from parent directory
+    OFFLINE_DIR="$SCRIPT_DIR/nvchad-offline"
+
+    # Extract if needed
+    if [ ! -d "$OFFLINE_DIR" ]; then
+        if [ -f "$SCRIPT_DIR/nvchad-offline.tar.gz" ]; then
+            echo "Extracting package..."
+            tar -xzf "$SCRIPT_DIR/nvchad-offline.tar.gz" -C "$SCRIPT_DIR"
+        else
+            echo "Error: nvchad-offline.tar.gz not found"
+            exit 1
+        fi
+    fi
+fi
 
 NVIM_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
 NVIM_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
@@ -17,17 +36,6 @@ NC='\033[0m'
 
 echo -e "${GREEN}=== NvChad Offline Installer ===${NC}"
 echo ""
-
-# Extract if needed
-if [ ! -d "$OFFLINE_DIR" ]; then
-    if [ -f "${SCRIPT_DIR}/nvchad-offline.tar.gz" ]; then
-        echo "Extracting package..."
-        tar -xzf "${SCRIPT_DIR}/nvchad-offline.tar.gz" -C "$SCRIPT_DIR"
-    else
-        echo -e "${RED}Error: nvchad-offline.tar.gz not found${NC}"
-        exit 1
-    fi
-fi
 
 # Check Neovim
 if ! command -v nvim &> /dev/null; then

@@ -243,7 +243,7 @@ local lazypath = "$TMP_NVIM/lazy.nvim"
 vim.opt.rtp:prepend(lazypath)
 
 require("lazy").setup({
-    { "williamboman/mason.nvim", dir = "$TMP_NVIM/mason.nvim" },
+    { "mason-org/mason.nvim", dir = "$TMP_NVIM/mason.nvim" },
 }, {
     install = { missing = false },
     dev = { path = "$TMP_NVIM" }

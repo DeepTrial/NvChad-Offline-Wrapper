@@ -6,10 +6,15 @@ Bundle NvChad for offline installation on Ubuntu 20.04/22.04.
 
 ### Option 1: GitHub Actions (Recommended)
 
-1. Fork this repository
-2. Actions → Build NvChad Offline Package → Run workflow
-3. Download `nvchad-offline-ubuntu.tar.gz`
-4. Transfer to offline machine and run `./install.sh`
+1. Go to Actions → Build NvChad Offline Package → Run workflow
+2. Download `nvchad-offline-ubuntu.tar.gz` from the release
+3. Transfer to offline machine
+4. Install:
+   ```bash
+   tar -xzf nvchad-offline.tar.gz
+   cd nvchad-offline
+   ./install.sh
+   ```
 
 ### Option 2: Local Build
 
