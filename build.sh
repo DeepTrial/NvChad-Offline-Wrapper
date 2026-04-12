@@ -171,75 +171,84 @@ if [ "$BUILD_TREESITTER" = true ]; then
     PARSER_DIR="$OFFLINE_DIR/treesitter/linux-x64"
     mkdir -p "$PARSER_DIR"
 
-    # Create temporary directories
+    # Create a proper Neovim config directory structure
     BUILD_ROOT=$(mktemp -d)
-    BUILD_CONFIG="$BUILD_ROOT/config"
-    BUILD_DATA="$BUILD_ROOT/data"
-    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA/nvim"
+    BUILD_CONFIG="$BUILD_ROOT/config/nvim"
+    BUILD_DATA="$BUILD_ROOT/data/nvim"
+    BUILD_STATE="$BUILD_ROOT/state/nvim"
+    BUILD_CACHE="$BUILD_ROOT/cache/nvim"
 
-    # Copy treesitter plugin
-    mkdir -p "$BUILD_DATA/nvim/pack/dist/start/nvim-treesitter"
-    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter/"* "$BUILD_DATA/nvim/pack/dist/start/nvim-treesitter/"
+    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA" "$BUILD_STATE" "$BUILD_CACHE"
+    mkdir -p "$BUILD_DATA/pack/dist/start"
 
-    # Create the Lua installer script
-    cat > "$BUILD_ROOT/install_parsers.lua" << LUAEOF
--- Set paths
-vim.opt.runtimepath:prepend("$BUILD_DATA/nvim/pack/dist/start/nvim-treesitter")
+    # Copy treesitter plugin to pack directory (auto-loaded)
+    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" "$BUILD_DATA/pack/dist/start/"
 
--- Load nvim-treesitter modules
-local configs = require("nvim-treesitter.configs")
-local install = require("nvim-treesitter.install")
+    # Create init.lua with treesitter setup
+    cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
+-- Treesitter will be auto-loaded from pack/dist/start/
 
--- Configure
-configs.setup({
+-- Configure treesitter
+require("nvim-treesitter.configs").setup({
     sync_install = true,
     auto_install = false,
+    ensure_installed = {},
 })
 
--- Parse parser list
-local parser_list = {}
-for parser in string.gmatch("$PARSERS", "([^,]+)") do
-    table.insert(parser_list, vim.trim(parser))
-end
+-- Parser install function
+local function install_parsers()
+    local install = require("nvim-treesitter.install")
+    local parser_str = vim.env.PARSERS_TO_INSTALL or ""
 
--- Install each parser
-for _, parser in ipairs(parser_list) do
-    print("Installing: " .. parser)
-    local ok, err = pcall(function()
-        install.install_parser(parser)
-    end)
-    if not ok then
-        print("  Error: " .. tostring(err))
-    else
-        print("  Done: " .. parser)
+    for parser in string.gmatch(parser_str, "([^,]+)") do
+        parser = vim.trim(parser)
+        print("Installing: " .. parser)
+        local ok, err = xpcall(function()
+            install.install_parser(parser)
+        end, debug.traceback)
+        if ok then
+            print("  Done: " .. parser)
+        else
+            print("  Error: " .. tostring(err))
+        end
     end
 end
 
--- Wait for async operations
-vim.wait(30000, function() return true end)
-LUAEOF
+-- Run after UI is ready
+vim.defer_fn(function()
+    install_parsers()
+    -- Wait for installs to complete then quit
+    vim.defer_fn(function()
+        vim.cmd("q!")
+    end, 60000)
+end, 1000)
+INITEOF
 
     echo "  Installing parsers: ${PARSERS//,/, }"
 
-    # Run the installer
-    XDG_CONFIG_HOME="$BUILD_CONFIG" \
-    XDG_DATA_HOME="$BUILD_DATA" \
-    nvim -l "$BUILD_ROOT/install_parsers.lua" 2>&1 || true
+    # Run Neovim with our config
+    XDG_CONFIG_HOME="$BUILD_ROOT/config" \
+    XDG_DATA_HOME="$BUILD_ROOT/data" \
+    XDG_STATE_HOME="$BUILD_ROOT/state" \
+    XDG_CACHE_HOME="$BUILD_ROOT/cache" \
+    PARSERS_TO_INSTALL="$PARSERS" \
+    nvim --headless 2>&1 || true
 
-    # Find compiled parsers - check all possible locations
-    for SEARCH_DIR in \
-        "$BUILD_DATA/nvim/pack/dist/start/nvim-treesitter/parser" \
-        "$BUILD_DATA/nvim/parser" \
-        "$BUILD_ROOT/parser"
-    do
-        if [ -d "$SEARCH_DIR" ]; then
-            COUNT=$(find "$SEARCH_DIR" -name "*.so" 2>/dev/null | wc -l)
-            if [ "$COUNT" -gt 0 ]; then
-                echo "  Found $COUNT parsers in $SEARCH_DIR"
-                cp "$SEARCH_DIR"/*.so "$PARSER_DIR/" 2>/dev/null || true
-            fi
+    # Find compiled parsers
+    TS_PARSER="$BUILD_DATA/pack/dist/start/nvim-treesitter/parser"
+    if [ -d "$TS_PARSER" ]; then
+        COUNT=$(find "$TS_PARSER" -name "*.so" 2>/dev/null | wc -l)
+        if [ "$COUNT" -gt 0 ]; then
+            echo "  Found $COUNT parsers"
+            cp "$TS_PARSER"/*.so "$PARSER_DIR/" 2>/dev/null || true
         fi
-    done
+    fi
+
+    # Also check data/parser
+    DATA_PARSER="$BUILD_DATA/parser"
+    if [ -d "$DATA_PARSER" ]; then
+        cp "$DATA_PARSER"/*.so "$PARSER_DIR/" 2>/dev/null || true
+    fi
 
     # Count final
     FINAL_COUNT=$(ls -1 "$PARSER_DIR"/*.so 2>/dev/null | wc -l)
@@ -248,30 +257,7 @@ LUAEOF
         ls "$PARSER_DIR"/*.so | xargs -n1 basename
     else
         echo -e "  ${RED}Error: No parsers were built${NC}"
-        echo "  Trying alternative method..."
-
-        # Alternative: use nvim --headless with direct module require
-        XDG_CONFIG_HOME="$BUILD_CONFIG" \
-        XDG_DATA_HOME="$BUILD_DATA" \
-        nvim --headless -c 'lua vim.opt.runtimepath:prepend(vim.env.XDG_DATA_HOME.."/nvim/pack/dist/start/nvim-treesitter")' \
-            -c 'lua require("nvim-treesitter.install").install_parser("lua")' \
-            -c 'sleep 30' \
-            -c 'q' 2>&1 || true
-
-        # Check again
-        for SEARCH_DIR in \
-            "$BUILD_DATA/nvim/pack/dist/start/nvim-treesitter/parser" \
-            "$BUILD_DATA/nvim/parser"
-        do
-            if [ -d "$SEARCH_DIR" ]; then
-                cp "$SEARCH_DIR"/*.so "$PARSER_DIR/" 2>/dev/null || true
-            fi
-        done
-
-        FINAL_COUNT=$(ls -1 "$PARSER_DIR"/*.so 2>/dev/null | wc -l)
-        if [ "$FINAL_COUNT" -gt 0 ]; then
-            echo -e "  ${GREEN}Built $FINAL_COUNT parsers (alternative method)${NC}"
-        fi
+        echo "  Check if gcc/g++ and tree-sitter CLI are installed"
     fi
 
     rm -rf "$BUILD_ROOT"
@@ -293,36 +279,70 @@ if [ "$BUILD_MASON" = true ]; then
     MASON_DIR="$OFFLINE_DIR/mason"
     mkdir -p "$MASON_DIR"
 
-    TMP_NVIM=$(mktemp -d)
-    cp -r "$OFFLINE_DIR/lazy-plugins/lazy.nvim" "$TMP_NVIM/"
-    cp -r "$OFFLINE_DIR/lazy-plugins/mason.nvim" "$TMP_NVIM/"
+    # Create a proper Neovim config directory structure
+    BUILD_ROOT=$(mktemp -d)
+    BUILD_CONFIG="$BUILD_ROOT/config/nvim"
+    BUILD_DATA="$BUILD_ROOT/data/nvim"
+    BUILD_STATE="$BUILD_ROOT/state/nvim"
+    BUILD_CACHE="$BUILD_ROOT/cache/nvim"
 
-    cat > "$TMP_NVIM/init.lua" << EOF
-local lazypath = "$TMP_NVIM/lazy.nvim"
-vim.opt.rtp:prepend(lazypath)
+    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA" "$BUILD_STATE" "$BUILD_CACHE"
+    mkdir -p "$BUILD_DATA/pack/dist/start"
 
-require("lazy").setup({
-    { "mason-org/mason.nvim", dir = "$TMP_NVIM/mason.nvim" },
-}, {
-    install = { missing = false },
-    dev = { path = "$TMP_NVIM" }
-})
+    # Copy mason plugin to pack directory (auto-loaded)
+    cp -r "$OFFLINE_DIR/lazy-plugins/mason.nvim" "$BUILD_DATA/pack/dist/start/mason.nvim"
+
+    # Create init.lua with mason setup
+    cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
+-- Mason will be auto-loaded from pack/dist/start/
+
+-- Setup mason
 require("mason").setup()
-EOF
+
+-- Install LSP servers
+local function install_lsp()
+    local mason_api = require("mason-api")
+    local lsp_str = vim.env.LSP_TO_INSTALL or ""
+
+    for lsp in string.gmatch(lsp_str, "([^,]+)") do
+        lsp = vim.trim(lsp)
+        print("Installing: " .. lsp)
+        local ok, err = xpcall(function()
+            vim.cmd("MasonInstall " .. lsp)
+        end, debug.traceback)
+        if not ok then
+            print("  Error: " .. tostring(err))
+        end
+    end
+end
+
+-- Run after UI is ready
+vim.defer_fn(function()
+    install_lsp()
+    -- Wait for installs to complete then quit
+    vim.defer_fn(function()
+        vim.cmd("q!")
+    end, 120000)
+end, 1000)
+INITEOF
 
     echo "  Installing LSP: ${LSP_SERVERS//,/, }"
-    NVIM_APPNAME="nvchad-build" timeout 300 nvim --headless \
-        "+MasonInstall ${LSP_SERVERS//,/ }" \
-        "+sleep 30" "+q" 2>&1 || true
+
+    # Run Neovim with our config
+    XDG_CONFIG_HOME="$BUILD_ROOT/config" \
+    XDG_DATA_HOME="$BUILD_ROOT/data" \
+    XDG_STATE_HOME="$BUILD_ROOT/state" \
+    XDG_CACHE_HOME="$BUILD_ROOT/cache" \
+    LSP_TO_INSTALL="$LSP_SERVERS" \
+    nvim --headless 2>&1 || true
 
     # Copy Mason packages
-    BUILT_MASON="$HOME/.local/share/nvimchad-build/mason"
-    if [ -d "$BUILT_MASON" ]; then
-        cp -rv "$BUILT_MASON" "$OFFLINE_DIR/" || true
-        echo -e "  ${GREEN}Mason packages installed${NC}"
+    if [ -d "$BUILD_DATA/mason" ]; then
+        cp -rv "$BUILD_DATA/mason" "$OFFLINE_DIR/"
+        echo -e "  ${GREEN}Mason LSP servers installed${NC}"
     fi
 
-    rm -rf "$TMP_NVIM"
+    rm -rf "$BUILD_ROOT"
 fi
 
 # ============================================
