@@ -271,6 +271,10 @@ fi
 # ============================================
 echo ""
 echo -e "${GREEN}Creating archive...${NC}"
+
+# Copy install.sh into the package
+cp "$SCRIPT_DIR/install.sh" "$OFFLINE_DIR/"
+
 cd "$SCRIPT_DIR"
 tar -czvf nvchad-offline.tar.gz nvchad-offline/
 
