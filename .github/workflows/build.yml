@@ -89,12 +89,12 @@ jobs:
         id: date
         run: echo "tag=v$(date +%Y.%m.%d)" >> $GITHUB_OUTPUT
 
-      - name: Create draft release
+      - name: Create release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.date.outputs.tag }}
           name: NvChad Offline Build ${{ steps.date.outputs.tag }}
-          draft: true
+          draft: false
           files: nvchad-offline.tar.gz
           body: |
             ## NvChad Offline Package
