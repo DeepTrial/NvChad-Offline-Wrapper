@@ -174,19 +174,19 @@ if [ "$BUILD_TREESITTER" = true ]; then
     # Create a proper Neovim config directory structure
     BUILD_ROOT=$(mktemp -d)
     BUILD_CONFIG="$BUILD_ROOT/config/nvim"
-    BUILD_DATA="$BUILD_ROOT/data/nvim"
-    BUILD_STATE="$BUILD_ROOT/state/nvim"
-    BUILD_CACHE="$BUILD_ROOT/cache/nvim"
+    BUILD_DATA="$BUILD_ROOT/data"
+    BUILD_STATE="$BUILD_ROOT/state"
+    BUILD_CACHE="$BUILD_ROOT/cache"
 
-    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA" "$BUILD_STATE" "$BUILD_CACHE"
-    mkdir -p "$BUILD_DATA/pack/dist/start"
+    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA/nvim/site/pack/dist/start" "$BUILD_STATE" "$BUILD_CACHE"
 
     # Copy treesitter plugin to pack directory (auto-loaded)
-    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" "$BUILD_DATA/pack/dist/start/"
+    # Must be in XDG_DATA_HOME/nvim/site/pack/ for Neovim to find it
+    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" "$BUILD_DATA/nvim/site/pack/dist/start/"
 
     # Create init.lua with treesitter setup
     cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
--- Treesitter will be auto-loaded from pack/dist/start/
+-- Treesitter is auto-loaded from data/nvim/site/pack/dist/start/
 
 -- Configure treesitter
 require("nvim-treesitter.configs").setup({
@@ -228,14 +228,14 @@ INITEOF
 
     # Run Neovim with our config
     XDG_CONFIG_HOME="$BUILD_ROOT/config" \
-    XDG_DATA_HOME="$BUILD_ROOT/data" \
-    XDG_STATE_HOME="$BUILD_ROOT/state" \
-    XDG_CACHE_HOME="$BUILD_ROOT/cache" \
+    XDG_DATA_HOME="$BUILD_DATA" \
+    XDG_STATE_HOME="$BUILD_STATE" \
+    XDG_CACHE_HOME="$BUILD_CACHE" \
     PARSERS_TO_INSTALL="$PARSERS" \
     nvim --headless 2>&1 || true
 
     # Find compiled parsers
-    TS_PARSER="$BUILD_DATA/pack/dist/start/nvim-treesitter/parser"
+    TS_PARSER="$BUILD_DATA/nvim/site/pack/dist/start/nvim-treesitter/parser"
     if [ -d "$TS_PARSER" ]; then
         COUNT=$(find "$TS_PARSER" -name "*.so" 2>/dev/null | wc -l)
         if [ "$COUNT" -gt 0 ]; then
@@ -244,8 +244,8 @@ INITEOF
         fi
     fi
 
-    # Also check data/parser
-    DATA_PARSER="$BUILD_DATA/parser"
+    # Also check data/parser (default install location)
+    DATA_PARSER="$BUILD_DATA/nvim/parser"
     if [ -d "$DATA_PARSER" ]; then
         cp "$DATA_PARSER"/*.so "$PARSER_DIR/" 2>/dev/null || true
     fi
@@ -282,37 +282,30 @@ if [ "$BUILD_MASON" = true ]; then
     # Create a proper Neovim config directory structure
     BUILD_ROOT=$(mktemp -d)
     BUILD_CONFIG="$BUILD_ROOT/config/nvim"
-    BUILD_DATA="$BUILD_ROOT/data/nvim"
-    BUILD_STATE="$BUILD_ROOT/state/nvim"
-    BUILD_CACHE="$BUILD_ROOT/cache/nvim"
+    BUILD_DATA="$BUILD_ROOT/data"
+    BUILD_STATE="$BUILD_ROOT/state"
+    BUILD_CACHE="$BUILD_ROOT/cache"
 
-    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA" "$BUILD_STATE" "$BUILD_CACHE"
-    mkdir -p "$BUILD_DATA/pack/dist/start"
+    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA/nvim/site/pack/dist/start" "$BUILD_STATE" "$BUILD_CACHE"
 
     # Copy mason plugin to pack directory (auto-loaded)
-    cp -r "$OFFLINE_DIR/lazy-plugins/mason.nvim" "$BUILD_DATA/pack/dist/start/mason.nvim"
+    cp -r "$OFFLINE_DIR/lazy-plugins/mason.nvim" "$BUILD_DATA/nvim/site/pack/dist/start/"
 
     # Create init.lua with mason setup
     cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
--- Mason will be auto-loaded from pack/dist/start/
+-- Mason is auto-loaded from data/nvim/site/pack/dist/start/
 
 -- Setup mason
 require("mason").setup()
 
 -- Install LSP servers
 local function install_lsp()
-    local mason_api = require("mason-api")
     local lsp_str = vim.env.LSP_TO_INSTALL or ""
 
     for lsp in string.gmatch(lsp_str, "([^,]+)") do
         lsp = vim.trim(lsp)
         print("Installing: " .. lsp)
-        local ok, err = xpcall(function()
-            vim.cmd("MasonInstall " .. lsp)
-        end, debug.traceback)
-        if not ok then
-            print("  Error: " .. tostring(err))
-        end
+        vim.cmd("MasonInstall " .. lsp)
     end
 end
 
@@ -330,15 +323,15 @@ INITEOF
 
     # Run Neovim with our config
     XDG_CONFIG_HOME="$BUILD_ROOT/config" \
-    XDG_DATA_HOME="$BUILD_ROOT/data" \
-    XDG_STATE_HOME="$BUILD_ROOT/state" \
-    XDG_CACHE_HOME="$BUILD_ROOT/cache" \
+    XDG_DATA_HOME="$BUILD_DATA" \
+    XDG_STATE_HOME="$BUILD_STATE" \
+    XDG_CACHE_HOME="$BUILD_CACHE" \
     LSP_TO_INSTALL="$LSP_SERVERS" \
     nvim --headless 2>&1 || true
 
     # Copy Mason packages
-    if [ -d "$BUILD_DATA/mason" ]; then
-        cp -rv "$BUILD_DATA/mason" "$OFFLINE_DIR/"
+    if [ -d "$BUILD_DATA/nvim/mason" ]; then
+        cp -rv "$BUILD_DATA/nvim/mason" "$OFFLINE_DIR/"
         echo -e "  ${GREEN}Mason LSP servers installed${NC}"
     fi
 
