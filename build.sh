@@ -171,65 +171,82 @@ if [ "$BUILD_TREESITTER" = true ]; then
     PARSER_DIR="$OFFLINE_DIR/treesitter/linux-x64"
     mkdir -p "$PARSER_DIR"
 
-    # Use a simple approach: install parsers with standard nvim config
-    # Create a minimal config directory
+    # Create build config directory
     BUILD_CONFIG=$(mktemp -d)
+    BUILD_DATA=$(mktemp -d)
 
-    # Copy treesitter to a location it expects
-    mkdir -p "$BUILD_CONFIG/pack/nvim-treesitter/start"
-    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" "$BUILD_CONFIG/pack/nvim-treesitter/start/"
+    # Copy treesitter plugin
+    mkdir -p "$BUILD_CONFIG/pack/plugins/start/nvim-treesitter"
+    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter/"* "$BUILD_CONFIG/pack/plugins/start/nvim-treesitter/"
 
-    cat > "$BUILD_CONFIG/init.lua" << 'LUAEOF'
--- Set parser install directory
-vim.opt.runtimepath:prepend(vim.fn.stdpath("config") .. "/pack/nvim-treesitter/start/nvim-treesitter")
+    # Create init.lua that properly loads treesitter
+    cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
+-- Bootstrap nvim-treesitter
+local ts_path = vim.fn.stdpath("config") .. "/pack/plugins/start/nvim-treesitter"
+vim.opt.runtimepath:prepend(ts_path)
 
--- Configure treesitter to install parsers to a known location
-local parser_dir = vim.fn.stdpath("data") .. "/parser"
-vim.fn.mkdir(parser_dir, "p")
-
+-- Setup treesitter
 require("nvim-treesitter.configs").setup({
-    parser_install_dir = parser_dir,
     sync_install = true,
     auto_install = false,
 })
-LUAEOF
+
+-- Define parser install command for headless use
+vim.api.nvim_create_user_command("BuildParser", function(opts)
+    local parser = opts.args
+    print("Building parser: " .. parser)
+
+    -- Get the parser installation function
+    local ok, ts = pcall(require, "nvim-treesitter")
+    if not ok then
+        print("ERROR: nvim-treesitter not loaded")
+        return
+    end
+
+    local parsers = require("nvim-treesitter.parsers")
+    local install = require("nvim-treesitter.install")
+
+    -- Install the parser
+    install.install_parser(parser, true)
+end, { nargs = 1 })
+INITEOF
 
     echo "  Installing parsers: ${PARSERS//,/, }"
 
-    # Install each parser one at a time for better error visibility
+    # Install each parser
     for parser in ${PARSERS//,/ }; do
         parser=$(echo "$parser" | tr -d ' ')
         echo "    Building: $parser"
-        NVIM_APPNAME="nvchad-ts-build" XDG_CONFIG_HOME="$BUILD_CONFIG" \
-            nvim --headless \
-            "+TSInstall! $parser" \
-            "+sleep 10" \
+        XDG_CONFIG_HOME="$BUILD_CONFIG" \
+        XDG_DATA_HOME="$BUILD_DATA" \
+        nvim --headless \
+            "+BuildParser $parser" \
+            "+sleep 15" \
             "+q" 2>&1 || true
     done
 
-    # Find and copy parsers
-    PARSER_SRC="$HOME/.local/share/nvimchad-ts-build/parser"
+    # Find compiled parsers
+    PARSER_SRC="$BUILD_DATA/nvim/parser"
     if [ -d "$PARSER_SRC" ]; then
         cp -v "$PARSER_SRC"/*.so "$PARSER_DIR/" 2>/dev/null || true
     fi
 
-    # Also check standard location
-    STD_PARSER="$BUILD_CONFIG/pack/nvim-treesitter/start/nvim-treesitter/parser"
-    if [ -d "$STD_PARSER" ]; then
-        cp -v "$STD_PARSER"/*.so "$PARSER_DIR/" 2>/dev/null || true
+    # Also check in plugin directory
+    PLUGIN_PARSER="$BUILD_CONFIG/pack/plugins/start/nvim-treesitter/parser"
+    if [ -d "$PLUGIN_PARSER" ]; then
+        cp -v "$PLUGIN_PARSER"/*.so "$PARSER_DIR/" 2>/dev/null || true
     fi
 
-    # Count final parsers
+    # Count
     FINAL_COUNT=$(ls -1 "$PARSER_DIR"/*.so 2>/dev/null | wc -l)
     if [ "$FINAL_COUNT" -gt 0 ]; then
         echo -e "  ${GREEN}Built $FINAL_COUNT parsers${NC}"
         ls "$PARSER_DIR"/*.so | xargs -n1 basename
     else
         echo -e "  ${RED}Error: No parsers were built${NC}"
-        echo "  This might be a gcc/tree-sitter-cli issue"
     fi
 
-    rm -rf "$BUILD_CONFIG"
+    rm -rf "$BUILD_CONFIG" "$BUILD_DATA"
 fi
 
 # ============================================
