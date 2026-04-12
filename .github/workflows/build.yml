@@ -16,24 +16,33 @@ on:
 
 jobs:
   build:
-    # Use Ubuntu 20.04 for glibc compatibility
-    # Binaries built on glibc 2.31 work on both Ubuntu 20.04 and 22.04
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+    container:
+      # Use Ubuntu 20.04 container for glibc 2.31 compatibility
+      # Binaries work on both Ubuntu 20.04 and 22.04
+      image: ubuntu:20.04
+      options: --user root
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git curl ca-certificates \
+            gcc g++ make \
+            tree
+          rm -rf /var/lib/apt/lists/*
 
       - name: Install Neovim
-        uses: rhysd/action-setup-vim@v1
-        with:
-          neovim: true
-          version: stable
-
-      - name: Install build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc g++ tree
+          curl -LO https://github.com/neovim/neovim/releases/download/stable/nvim-linux-x86_64.tar.gz
+          tar xzf nvim-linux-x86_64.tar.gz
+          mv nvim-linux-x86_64 /opt/nvim
+          ln -s /opt/nvim/bin/nvim /usr/local/bin/nvim
+          nvim --version
+
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Build offline package
         env:
@@ -41,8 +50,6 @@ jobs:
           LSP: ${{ inputs.lsp }}
         run: |
           chmod +x build.sh
-
-          # Build with all components
           ./build.sh --treesitter "$PARSERS" --mason "$LSP"
 
       - name: Show package contents
@@ -51,7 +58,6 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           tree nvchad-offline || ls -R nvchad-offline
           echo '```' >> $GITHUB_STEP_SUMMARY
-
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## File Sizes" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
