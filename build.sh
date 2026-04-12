@@ -171,64 +171,53 @@ if [ "$BUILD_TREESITTER" = true ]; then
     PARSER_DIR="$OFFLINE_DIR/treesitter/linux-x64"
     mkdir -p "$PARSER_DIR"
 
-    # Create temporary Neovim config
-    TMP_NVIM=$(mktemp -d)
-    cp -r "$OFFLINE_DIR/lazy-plugins/lazy.nvim" "$TMP_NVIM/"
-    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" "$TMP_NVIM/"
-    cp -r "$OFFLINE_DIR/lazy-plugins/plenary.nvim" "$TMP_NVIM/"
+    # Use a simple approach: install parsers with standard nvim config
+    # Create a minimal config directory
+    BUILD_CONFIG=$(mktemp -d)
 
-    cat > "$TMP_NVIM/init.lua" << EOF
-vim.g.mapleader = " "
-local lazypath = "$TMP_NVIM/lazy.nvim"
-vim.opt.rtp:prepend(lazypath)
+    # Copy treesitter to a location it expects
+    mkdir -p "$BUILD_CONFIG/pack/nvim-treesitter/start"
+    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" "$BUILD_CONFIG/pack/nvim-treesitter/start/"
 
-require("lazy").setup({
-    {
-        "nvim-treesitter/nvim-treesitter",
-        dir = "$TMP_NVIM/nvim-treesitter",
-        dependencies = { dir = "$TMP_NVIM/plenary.nvim" },
-        build = ":TSUpdate",
-        opts = {
-            ensure_installed = vim.split("$PARSERS", ","),
-            sync_install = true,
-            auto_install = false,
-        },
-        config = function(_, opts)
-            require("nvim-treesitter.configs").setup(opts)
-        end,
-    },
-}, {
-    install = { missing = false },
-    dev = { path = "$TMP_NVIM" }
+    cat > "$BUILD_CONFIG/init.lua" << 'LUAEOF'
+-- Set parser install directory
+vim.opt.runtimepath:prepend(vim.fn.stdpath("config") .. "/pack/nvim-treesitter/start/nvim-treesitter")
+
+-- Configure treesitter to install parsers to a known location
+local parser_dir = vim.fn.stdpath("data") .. "/parser"
+vim.fn.mkdir(parser_dir, "p")
+
+require("nvim-treesitter.configs").setup({
+    parser_install_dir = parser_dir,
+    sync_install = true,
+    auto_install = false,
 })
-EOF
+LUAEOF
 
     echo "  Installing parsers: ${PARSERS//,/, }"
 
-    # Run nvim to install parsers - use multiple commands to ensure completion
-    NVIM_APPNAME="nvchad-build" nvim --headless \
-        "+Lazy! load nvim-treesitter" \
-        "+TSInstallSync ${PARSERS//,/ } force" \
-        "+sleep 10" \
-        "+q" 2>&1 | tail -20 || true
-
-    # Find parser directory - check multiple possible locations
-    PARSER_FOUND=false
-    for SEARCH_DIR in \
-        "$HOME/.local/share/nvimchad-build/lazy/nvim-treesitter/parser" \
-        "$HOME/.local/share/nvimchad-build/nvim-treesitter/parser" \
-        "$TMP_NVIM/nvim-treesitter/parser"
-    do
-        if [ -d "$SEARCH_DIR" ]; then
-            SO_COUNT=$(find "$SEARCH_DIR" -name "*.so" 2>/dev/null | wc -l)
-            if [ "$SO_COUNT" -gt 0 ]; then
-                echo "  Found $SO_COUNT parsers in $SEARCH_DIR"
-                cp "$SEARCH_DIR"/*.so "$PARSER_DIR/" 2>/dev/null || true
-                PARSER_FOUND=true
-                break
-            fi
-        fi
+    # Install each parser one at a time for better error visibility
+    for parser in ${PARSERS//,/ }; do
+        parser=$(echo "$parser" | tr -d ' ')
+        echo "    Building: $parser"
+        NVIM_APPNAME="nvchad-ts-build" XDG_CONFIG_HOME="$BUILD_CONFIG" \
+            nvim --headless \
+            "+TSInstall! $parser" \
+            "+sleep 10" \
+            "+q" 2>&1 || true
     done
+
+    # Find and copy parsers
+    PARSER_SRC="$HOME/.local/share/nvimchad-ts-build/parser"
+    if [ -d "$PARSER_SRC" ]; then
+        cp -v "$PARSER_SRC"/*.so "$PARSER_DIR/" 2>/dev/null || true
+    fi
+
+    # Also check standard location
+    STD_PARSER="$BUILD_CONFIG/pack/nvim-treesitter/start/nvim-treesitter/parser"
+    if [ -d "$STD_PARSER" ]; then
+        cp -v "$STD_PARSER"/*.so "$PARSER_DIR/" 2>/dev/null || true
+    fi
 
     # Count final parsers
     FINAL_COUNT=$(ls -1 "$PARSER_DIR"/*.so 2>/dev/null | wc -l)
@@ -237,10 +226,10 @@ EOF
         ls "$PARSER_DIR"/*.so | xargs -n1 basename
     else
         echo -e "  ${RED}Error: No parsers were built${NC}"
-        echo "  Check if gcc/g++ is installed and working"
+        echo "  This might be a gcc/tree-sitter-cli issue"
     fi
 
-    rm -rf "$TMP_NVIM"
+    rm -rf "$BUILD_CONFIG"
 fi
 
 # ============================================
