@@ -111,10 +111,26 @@ rm -rf "$OFFLINE_DIR/base-config/NvChad/.git"
 # ============================================
 echo -e "${YELLOW}[3/4] Downloading plugins...${NC}"
 
-declare -A PLUGINS=(
-    ["nvim-lua/plenary.nvim"]="plenary.nvim"
+# Plugins that need a specific branch (NvChad v2.5 components)
+declare -A BRANCH_PLUGINS=(
     ["NvChad/base46"]="base46"
     ["NvChad/ui"]="ui"
+)
+
+for repo in "${!BRANCH_PLUGINS[@]}"; do
+    dir="${BRANCH_PLUGINS[$repo]}"
+    printf "  %-25s " "$dir"
+    if git clone --depth 1 --branch v2.5 "https://github.com/$repo" "$OFFLINE_DIR/lazy-plugins/$dir" 2>&1; then
+        rm -rf "$OFFLINE_DIR/lazy-plugins/$dir/.git"
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAIL${NC}"
+    fi
+done
+
+# All other plugins (use default branch)
+declare -A PLUGINS=(
+    ["nvim-lua/plenary.nvim"]="plenary.nvim"
     ["nvzone/volt"]="volt"
     ["nvzone/menu"]="menu"
     ["nvzone/minty"]="minty"
@@ -141,9 +157,12 @@ declare -A PLUGINS=(
 for repo in "${!PLUGINS[@]}"; do
     dir="${PLUGINS[$repo]}"
     printf "  %-25s " "$dir"
-    git clone --depth 1 "https://github.com/$repo" "$OFFLINE_DIR/lazy-plugins/$dir" 2>/dev/null
-    rm -rf "$OFFLINE_DIR/lazy-plugins/$dir/.git"
-    echo "OK"
+    if git clone --depth 1 "https://github.com/$repo" "$OFFLINE_DIR/lazy-plugins/$dir" 2>&1; then
+        rm -rf "$OFFLINE_DIR/lazy-plugins/$dir/.git"
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAIL${NC}"
+    fi
 done
 
 # cmp-async-path from codeberg
