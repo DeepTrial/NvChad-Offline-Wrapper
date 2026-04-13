@@ -186,42 +186,70 @@ if [ "$BUILD_TREESITTER" = true ]; then
 
     # Create init.lua with treesitter setup
     cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
--- Treesitter is auto-loaded from data/nvim/site/pack/dist/start/
-
--- Configure treesitter
-require("nvim-treesitter.configs").setup({
-    sync_install = true,
-    auto_install = false,
-    ensure_installed = {},
-})
-
--- Parser install function
-local function install_parsers()
-    local install = require("nvim-treesitter.install")
-    local parser_str = vim.env.PARSERS_TO_INSTALL or ""
-
-    for parser in string.gmatch(parser_str, "([^,]+)") do
-        parser = vim.trim(parser)
-        print("Installing: " .. parser)
-        local ok, err = xpcall(function()
-            install.install_parser(parser)
-        end, debug.traceback)
-        if ok then
-            print("  Done: " .. parser)
-        else
-            print("  Error: " .. tostring(err))
-        end
-    end
+-- Explicitly add treesitter plugin to runtimepath
+local ts_dir = vim.env.TS_PLUGIN_DIR
+if ts_dir and ts_dir ~= "" then
+    vim.opt.rtp:prepend(ts_dir)
 end
 
--- Run after UI is ready
-vim.defer_fn(function()
-    install_parsers()
-    -- Wait for installs to complete then quit
-    vim.defer_fn(function()
-        vim.cmd("q!")
-    end, 60000)
-end, 1000)
+-- Parse the list of parsers to install
+local parser_str = vim.env.PARSERS_TO_INSTALL or ""
+local parsers = {}
+for parser in string.gmatch(parser_str, "([^,]+)") do
+    table.insert(parsers, vim.trim(parser))
+end
+
+-- Install after plugins are loaded
+vim.api.nvim_create_autocmd("VimEnter", {
+    once = true,
+    callback = function()
+        local total = #parsers
+
+        for _, parser in ipairs(parsers) do
+            print("Installing: " .. parser)
+            local ok, err = pcall(vim.cmd, "TSInstall " .. parser)
+            if not ok then
+                print("  Error starting: " .. tostring(err))
+            end
+        end
+
+        -- Candidate directories where parsers may be written
+        local search_dirs = {
+            (ts_dir or "") .. "/parser",
+            vim.fn.stdpath("data") .. "/parser",
+            vim.fn.stdpath("data") .. "/site/parser",
+            vim.fn.stdpath("data") .. "/site/pack/dist/start/nvim-treesitter/parser",
+        }
+
+        local function count_installed()
+            local found = 0
+            for _, parser in ipairs(parsers) do
+                for _, dir in ipairs(search_dirs) do
+                    if vim.fn.filereadable(dir .. "/" .. parser .. ".so") == 1 then
+                        found = found + 1
+                        break
+                    end
+                end
+            end
+            return found
+        end
+
+        -- Poll for completion
+        local timer = vim.uv.new_timer()
+        local elapsed = 0
+        timer:start(5000, 5000, vim.schedule_wrap(function()
+            elapsed = elapsed + 5
+            local installed = count_installed()
+            print("  Progress: " .. installed .. "/" .. total .. " parsers (" .. elapsed .. "s)")
+            if installed >= total or elapsed >= 120 then
+                timer:stop()
+                timer:close()
+                print("  Final: " .. installed .. "/" .. total .. " parsers installed")
+                vim.cmd("q!")
+            end
+        end))
+    end,
+})
 INITEOF
 
     echo "  Installing parsers: ${PARSERS//,/, }"
@@ -232,23 +260,21 @@ INITEOF
     XDG_STATE_HOME="$BUILD_STATE" \
     XDG_CACHE_HOME="$BUILD_CACHE" \
     PARSERS_TO_INSTALL="$PARSERS" \
+    TS_PLUGIN_DIR="$BUILD_DATA/nvim/site/pack/dist/start/nvim-treesitter" \
     nvim --headless 2>&1 || true
 
-    # Find compiled parsers
-    TS_PARSER="$BUILD_DATA/nvim/site/pack/dist/start/nvim-treesitter/parser"
-    if [ -d "$TS_PARSER" ]; then
-        COUNT=$(find "$TS_PARSER" -name "*.so" 2>/dev/null | wc -l)
-        if [ "$COUNT" -gt 0 ]; then
-            echo "  Found $COUNT parsers"
-            cp "$TS_PARSER"/*.so "$PARSER_DIR/" 2>/dev/null || true
+    # Find compiled parsers in all known locations
+    for SEARCH_DIR in \
+        "$BUILD_DATA/nvim/site/pack/dist/start/nvim-treesitter/parser" \
+        "$BUILD_DATA/nvim/parser" \
+        "$BUILD_DATA/nvim/site/parser" \
+        "$BUILD_STATE/nvim/parser" \
+        "$BUILD_CACHE/nvim/parser"; do
+        if [ -d "$SEARCH_DIR" ]; then
+            echo "  Found parsers in: $SEARCH_DIR"
+            cp "$SEARCH_DIR"/*.so "$PARSER_DIR/" 2>/dev/null || true
         fi
-    fi
-
-    # Also check data/parser (default install location)
-    DATA_PARSER="$BUILD_DATA/nvim/parser"
-    if [ -d "$DATA_PARSER" ]; then
-        cp "$DATA_PARSER"/*.so "$PARSER_DIR/" 2>/dev/null || true
-    fi
+    done
 
     # Count final
     FINAL_COUNT=$(ls -1 "$PARSER_DIR"/*.so 2>/dev/null | wc -l)
