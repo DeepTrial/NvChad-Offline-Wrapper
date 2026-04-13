@@ -173,13 +173,13 @@ if [ "$BUILD_TREESITTER" = true ]; then
 
     # Ensure tree-sitter CLI is available (required by nvim-treesitter for compilation)
     if ! command -v tree-sitter &> /dev/null; then
-        echo "  Installing tree-sitter CLI..."
-        TS_CLI=$(mktemp)
-        curl -sL https://github.com/tree-sitter/tree-sitter/releases/latest/download/tree-sitter-linux-x64.gz \
-            | gunzip > "$TS_CLI"
-        chmod +x "$TS_CLI"
-        mv "$TS_CLI" /usr/local/bin/tree-sitter
-        echo "  tree-sitter $(tree-sitter --version 2>&1 || echo 'installed')"
+        echo "  Installing tree-sitter CLI (building from source)..."
+        if ! command -v cargo &> /dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable 2>&1
+            export PATH="$HOME/.cargo/bin:$PATH"
+        fi
+        cargo install tree-sitter-cli 2>&1
+        echo "  $(tree-sitter --version)"
     fi
 
     # Create a proper Neovim config directory structure
