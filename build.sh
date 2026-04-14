@@ -128,6 +128,104 @@ for repo in "${!BRANCH_PLUGINS[@]}"; do
     fi
 done
 
+# Patch ui v2.5: add nvchad.cmp module required by NvChad core v2.5
+# (NvChad core v2.5 was updated to require "nvchad.cmp" but ui v2.5 lacks it)
+UI_DIR="$OFFLINE_DIR/lazy-plugins/ui"
+mkdir -p "$UI_DIR/lua/nvchad/cmp"
+
+cat > "$UI_DIR/lua/nvchad/cmp/init.lua" << 'CMPEOF'
+local cmp_ui = require("nvconfig").ui.cmp
+local cmp_style = cmp_ui.style
+local format_color = require "nvchad.cmp.format"
+
+local atom_styled = cmp_style == "atom" or cmp_style == "atom_colored"
+local fields = (atom_styled or cmp_ui.icons_left) and { "kind", "abbr", "menu" } or { "abbr", "kind", "menu" }
+
+local M = {
+  formatting = {
+    format = function(entry, item)
+      local icons = require "nvchad.icons.lspkind"
+      local icon = icons[item.kind] or ""
+      local kind = item.kind or ""
+
+      if atom_styled then
+        item.menu = kind
+        item.menu_hl_group = "LineNr"
+        item.kind = " " .. icon .. " "
+      elseif cmp_ui.icons_left then
+        item.menu = kind
+        item.menu_hl_group = "CmpItemKind" .. kind
+        item.kind = icon
+      else
+        item.kind = " " .. icon .. " " .. kind
+        item.menu_hl_group = "comment"
+      end
+
+      if kind == "Color" and cmp_ui.format_colors.lsp then
+        format_color.lsp(entry, item, (not (atom_styled or cmp_ui.icons_left) and kind) or "")
+      end
+
+      if #item.abbr > cmp_ui.abbr_maxwidth then
+        item.abbr = string.sub(item.abbr, 1, cmp_ui.abbr_maxwidth) .. "…"
+      end
+
+      return item
+    end,
+
+    fields = fields,
+  },
+
+  window = {
+    completion = {
+      scrollbar = false,
+      side_padding = atom_styled and 0 or 1,
+      winhighlight = "Normal:CmpPmenu,CursorLine:CmpSel,Search:None,FloatBorder:CmpBorder",
+      border = atom_styled and "none" or "single",
+    },
+
+    documentation = {
+      border = "single",
+      winhighlight = "Normal:CmpDoc,FloatBorder:CmpDocBorder",
+    },
+  },
+}
+
+return M
+CMPEOF
+
+cat > "$UI_DIR/lua/nvchad/cmp/format.lua" << 'FMTEOF'
+local M = {}
+local api = vim.api
+local cmp_ui = require("nvconfig").ui.cmp
+local icon = cmp_ui.format_colors.icon .. " "
+
+local hlcache = {}
+
+M.lsp = function(entry, item, kind_txt)
+  local color = entry.completion_item.documentation
+
+  if color and type(color) == "string" and color:match "^#%x%x%x%x%x%x$" then
+    local hl = "hex-" .. color:sub(2)
+
+    if not hlcache[hl] then
+      api.nvim_set_hl(0, hl, { fg = color })
+      hlcache[hl] = true
+    end
+
+    item.kind = ((cmp_ui.icons_left and icon) or (" " .. icon)) .. kind_txt
+    item.kind_hl_group = hl
+    item.menu_hl_group = hl
+  end
+end
+
+return M
+FMTEOF
+
+# Patch nvconfig.lua: add missing cmp fields needed by nvchad.cmp module
+sed -i '/style = "default",.*atom/a\        icons_left = false,\n        abbr_maxwidth = 60,\n        format_colors = { lsp = true, icon = "󱓻" },' "$UI_DIR/lua/nvconfig.lua"
+
+echo "  ui v2.5 patched with nvchad.cmp module"
+
 # All other plugins (use default branch)
 declare -A PLUGINS=(
     ["nvim-lua/plenary.nvim"]="plenary.nvim"
