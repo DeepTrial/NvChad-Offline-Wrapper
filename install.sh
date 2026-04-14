@@ -137,10 +137,12 @@ else
     echo -e "${YELLOW}No Mason LSP servers found${NC}"
 fi
 
-# Generate cache
+# Generate base46 theme cache
+# base46's build hook (load_all_highlights) only runs when lazy.nvim installs a plugin.
+# In offline mode plugins are pre-installed, so we must call it explicitly.
 echo ""
 echo "Generating theme cache..."
-nvim --headless "+q!" 2>/dev/null || true
+nvim --headless -c 'lua require("base46").load_all_highlights()' -c 'q!' 2>/dev/null || true
 
 echo ""
 echo -e "${GREEN}============================================${NC}"
