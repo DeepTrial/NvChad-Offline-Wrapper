@@ -35,8 +35,14 @@ jobs:
             git curl ca-certificates \
             gcc g++ make cmake \
             gettext unzip \
-            libclang-dev \
             tree sudo
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Install tree-sitter build dependencies
+        if: ${{ inputs.parsers != '' }}
+        run: |
+          apt-get update
+          apt-get install -y libclang-dev
           rm -rf /var/lib/apt/lists/*
 
       - name: Checkout

@@ -102,34 +102,31 @@ NVIM_BIN="nvim"
 # 1. Build Neovim from source (Ubuntu 20.04 compatible)
 # ============================================
 if [ "$BUILD_NEOVIM" = true ]; then
-    echo -e "${YELLOW}[1/5] Building Neovim from source...${NC}"
+    echo -e "${YELLOW}[1/5] Downloading Neovim...${NC}"
 
-    if ! command -v cmake &> /dev/null; then
-        echo -e "${RED}Error: cmake not found. Cannot build neovim.${NC}"
+    # Get latest stable release from GitHub
+    NVIM_RELEASE_URL=$(curl -sL https://api.github.com/repos/neovim/neovim/releases/latest | grep "browser_download_url.*linux64.tar.gz" | cut -d '"' -f 4)
+
+    if [ -z "$NVIM_RELEASE_URL" ]; then
+        echo -e "${RED}Error: Could not find Neovim release URL${NC}"
         exit 1
     fi
 
+    echo "  Downloading from: $NVIM_RELEASE_URL"
+
     BUILD_ROOT=$(mktemp -d)
-    cd "$BUILD_ROOT"
+    curl -sL "$NVIM_RELEASE_URL" -o "$BUILD_ROOT/nvim-linux64.tar.gz"
 
-    git clone --depth 1 --branch stable https://github.com/neovim/neovim.git
-    cd neovim
+    # Extract and copy to offline package
+    tar -xzf "$BUILD_ROOT/nvim-linux64.tar.gz" -C "$BUILD_ROOT"
+    cp -r "$BUILD_ROOT/nvim-linux64"/* "$OFFLINE_DIR/nvim/linux-x64/"
 
-    # Build with Release mode, install to local prefix
-    make CMAKE_BUILD_TYPE=Release CMAKE_EXTRA_FLAGS="-DCMAKE_INSTALL_PREFIX=$BUILD_ROOT/neovim-install"
-    make install
-
-    # Copy neovim binaries and runtime
-    mkdir -p "$OFFLINE_DIR/nvim/linux-x64"
-    cp -r "$BUILD_ROOT/neovim-install"/* "$OFFLINE_DIR/nvim/linux-x64/"
-
-    # Set path to our built nvim
+    # Set path to our nvim
     NVIM_BIN="$OFFLINE_DIR/nvim/linux-x64/bin/nvim"
 
-    echo -e "${GREEN}Neovim built successfully${NC}"
+    echo -e "${GREEN}Neovim downloaded successfully${NC}"
     "$NVIM_BIN" --version | head -3
 
-    cd "$SCRIPT_DIR"
     rm -rf "$BUILD_ROOT"
 else
     echo -e "${YELLOW}[1/5] Using system neovim...${NC}"
