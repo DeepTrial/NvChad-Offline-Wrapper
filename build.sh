@@ -104,12 +104,25 @@ NVIM_BIN="nvim"
 if [ "$BUILD_NEOVIM" = true ]; then
     echo -e "${YELLOW}[1/5] Downloading Neovim...${NC}"
 
-    # Get latest stable release from GitHub
-    NVIM_RELEASE_URL=$(curl -sL https://api.github.com/repos/neovim/neovim/releases/latest | grep "browser_download_url.*linux64.tar.gz" | cut -d '"' -f 4)
+    # Get latest stable release URL from GitHub
+    # Try GitHub API first, fallback to scraping the releases page
+    NVIM_RELEASE_URL=$(curl -sL -H "Accept: application/vnd.github+json" https://api.github.com/repos/neovim/neovim/releases/latest 2>/dev/null | grep "browser_download_url.*linux-x86_64.tar.gz" | grep -v "appimage" | head -1 | cut -d '"' -f 4)
 
     if [ -z "$NVIM_RELEASE_URL" ]; then
-        echo -e "${RED}Error: Could not find Neovim release URL${NC}"
-        exit 1
+        # Fallback: construct URL from latest tag
+        LATEST_TAG=$(curl -sL https://api.github.com/repos/neovim/neovim/releases/latest 2>/dev/null | grep '"tag_name"' | head -1 | cut -d '"' -f 4)
+        if [ -n "$LATEST_TAG" ]; then
+            NVIM_RELEASE_URL="https://github.com/neovim/neovim/releases/download/$LATEST_TAG/nvim-linux-x86_64.tar.gz"
+        fi
+    fi
+
+    if [ -z "$NVIM_RELEASE_URL" ]; then
+        # Last resort: hardcode a known stable version
+        # Try with verbose output for debugging
+        echo -e "${YELLOW}Debug: Attempting to query GitHub API...${NC}"
+        curl -v https://api.github.com/repos/neovim/neovim/releases/latest 2>&1 | head -20 || true
+        echo -e "${YELLOW}Warning: Could not auto-detect latest Neovim release, using v0.11.3${NC}"
+        NVIM_RELEASE_URL="https://github.com/neovim/neovim/releases/download/v0.11.3/nvim-linux-x86_64.tar.gz"
     fi
 
     echo "  Downloading from: $NVIM_RELEASE_URL"
