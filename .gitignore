@@ -1,4 +1,7 @@
 # Build artifacts
+lazyvim-offline/
+lazyvim-offline.tar.gz
+lazyvim-offline-*.tar.gz
 nvchad-offline/
 nvchad-offline.tar.gz
 nvchad-offline-*.tar.gz

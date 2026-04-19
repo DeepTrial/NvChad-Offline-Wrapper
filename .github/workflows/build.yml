@@ -1,4 +1,4 @@
-name: Build NvChad Offline Package
+name: Build LazyVim Offline Package
 
 on:
   workflow_dispatch:
@@ -25,6 +25,7 @@ jobs:
       options: --user root
     env:
       DEBIAN_FRONTEND: noninteractive
+      HOME: /root
 
     steps:
       - name: Install dependencies
@@ -35,16 +36,8 @@ jobs:
             gcc g++ make cmake \
             gettext unzip \
             libclang-dev \
-            tree
+            tree sudo
           rm -rf /var/lib/apt/lists/*
-
-      - name: Build Neovim from source
-        run: |
-          git clone --depth 1 --branch stable https://github.com/neovim/neovim.git
-          cd neovim
-          make CMAKE_BUILD_TYPE=Release
-          make install
-          nvim --version
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,19 +54,29 @@ jobs:
         run: |
           echo "## Package Contents" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          tree nvchad-offline || ls -R nvchad-offline
+          tree lazyvim-offline || ls -R lazyvim-offline
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Neovim Binary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          lazyvim-offline/nvim/linux-x64/bin/nvim --version | head -3
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## File Sizes" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          ls -lh nvchad-offline.tar.gz
+          ls -lh lazyvim-offline.tar.gz
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Plugins Included" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls lazyvim-offline/lazy-plugins/
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nvchad-offline-ubuntu
-          path: nvchad-offline.tar.gz
+          name: lazyvim-offline-ubuntu
+          path: lazyvim-offline.tar.gz
           retention-days: 30
 
   release:
@@ -84,7 +87,7 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: nvchad-offline-ubuntu
+          name: lazyvim-offline-ubuntu
 
       - name: Get date tag
         id: date
@@ -94,23 +97,34 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.date.outputs.tag }}
-          name: NvChad Offline Build ${{ steps.date.outputs.tag }}
+          name: LazyVim Offline Build ${{ steps.date.outputs.tag }}
           draft: false
-          files: nvchad-offline.tar.gz
+          files: lazyvim-offline.tar.gz
           body: |
-            ## NvChad Offline Package
+            ## LazyVim Offline Package
+
+            Includes Neovim binary + LazyVim + all plugins for offline use.
 
             Built on Ubuntu 20.04 (glibc 2.31) for compatibility with:
             - Ubuntu 20.04
             - Ubuntu 22.04
 
             ### Included
+            - Neovim (latest stable)
+            - LazyVim starter config
+            - All LazyVim plugins (pre-downloaded)
             - Treesitter parsers: ${{ inputs.parsers }}
             - Mason LSP: ${{ inputs.lsp }}
 
             ### Usage
             ```bash
-            tar -xzf nvchad-offline.tar.gz
-            cd nvchad-offline
+            tar -xzf lazyvim-offline.tar.gz
+            cd lazyvim-offline
             ./install.sh
+
+            # Add to PATH if needed
+            export PATH="$HOME/.local/bin:$PATH"
+
+            # Start LazyVim
+            nvim
             ```

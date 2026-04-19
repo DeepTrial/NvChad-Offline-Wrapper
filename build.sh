@@ -1,11 +1,11 @@
 #!/bin/bash
-# NvChad Offline Package Builder
+# LazyVim Offline Package Builder
 # Run this script in an online environment to create the offline package
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OFFLINE_DIR="${SCRIPT_DIR}/nvchad-offline"
+OFFLINE_DIR="${SCRIPT_DIR}/lazyvim-offline"
 
 # Colors
 RED='\033[0;31m'
@@ -18,6 +18,7 @@ BUILD_TREESITTER=false
 BUILD_MASON=false
 PARSERS=""
 LSP_SERVERS=""
+BUILD_NEOVIM=true
 
 usage() {
     echo "Usage: $0 [OPTIONS]"
@@ -28,14 +29,15 @@ usage() {
     echo "  --mason [packages]      Build Mason LSP servers (comma-separated)"
     echo "                          Default: lua_ls"
     echo "  --all                   Build both Treesitter and Mason with defaults"
+    echo "  --no-neovim             Skip building neovim (use system neovim)"
     echo "  --help                  Show this help"
     echo ""
     echo "Examples:"
-    echo "  $0                                    # Download plugins only"
-    echo "  $0 --treesitter                       # Download + build default parsers"
-    echo "  $0 --treesitter lua,vim,python        # Download + build specific parsers"
-    echo "  $0 --mason lua_ls,pylsp               # Download + build specific LSP"
-    echo "  $0 --all                              # Download + build everything"
+    echo "  $0                                    # Build neovim + download plugins only"
+    echo "  $0 --treesitter                       # Build + default parsers"
+    echo "  $0 --treesitter lua,vim,python        # Build + specific parsers"
+    echo "  $0 --mason lua_ls,pylsp               # Build + specific LSP"
+    echo "  $0 --all                              # Build everything"
     exit 0
 }
 
@@ -73,6 +75,10 @@ while [[ $# -gt 0 ]]; do
             LSP_SERVERS="$DEFAULT_LSP"
             shift
             ;;
+        --no-neovim)
+            BUILD_NEOVIM=false
+            shift
+            ;;
         --help|-h)
             usage
             ;;
@@ -83,255 +89,296 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo -e "${GREEN}=== NvChad Offline Package Builder ===${NC}"
+echo -e "${GREEN}=== LazyVim Offline Package Builder ===${NC}"
 echo ""
 
-# Create directory structure
-mkdir -p "$OFFLINE_DIR"/{lazy-plugins,starter,base-config}
+# Clean and create directory structure
+rm -rf "$OFFLINE_DIR"
+mkdir -p "$OFFLINE_DIR"/{lazy-plugins,lazyvim-starter,nvim/linux-x64}
+
+NVIM_BIN="nvim"
 
 # ============================================
-# 1. Download lazy.nvim plugin manager
+# 1. Build Neovim from source (Ubuntu 20.04 compatible)
 # ============================================
-echo -e "${YELLOW}[1/4] Downloading lazy.nvim...${NC}"
-git clone --depth 1 https://github.com/folke/lazy.nvim "$OFFLINE_DIR/lazy-plugins/lazy.nvim"
-rm -rf "$OFFLINE_DIR/lazy-plugins/lazy.nvim/.git"
+if [ "$BUILD_NEOVIM" = true ]; then
+    echo -e "${YELLOW}[1/5] Building Neovim from source...${NC}"
 
-# ============================================
-# 2. Download NvChad configs
-# ============================================
-echo -e "${YELLOW}[2/4] Downloading NvChad configs...${NC}"
-git clone --depth 1 https://github.com/nvchad/starter "$OFFLINE_DIR/starter"
-rm -rf "$OFFLINE_DIR/starter/.git"
-
-git clone --depth 1 --branch v2.5 https://github.com/NvChad/NvChad "$OFFLINE_DIR/base-config/NvChad"
-rm -rf "$OFFLINE_DIR/base-config/NvChad/.git"
-
-# ============================================
-# 3. Download plugins
-# ============================================
-echo -e "${YELLOW}[3/4] Downloading plugins...${NC}"
-
-# Plugins that need a specific branch (NvChad v2.5 components)
-declare -A BRANCH_PLUGINS=(
-    ["NvChad/base46"]="base46"
-    ["NvChad/ui"]="ui"
-)
-
-for repo in "${!BRANCH_PLUGINS[@]}"; do
-    dir="${BRANCH_PLUGINS[$repo]}"
-    printf "  %-25s " "$dir"
-    if git clone --depth 1 --branch v2.5 "https://github.com/$repo" "$OFFLINE_DIR/lazy-plugins/$dir" 2>&1; then
-        rm -rf "$OFFLINE_DIR/lazy-plugins/$dir/.git"
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAIL${NC}"
+    if ! command -v cmake &> /dev/null; then
+        echo -e "${RED}Error: cmake not found. Cannot build neovim.${NC}"
+        exit 1
     fi
-done
 
-# Patch ui v2.5: add nvchad.cmp module required by NvChad core v2.5
-# (NvChad core v2.5 was updated to require "nvchad.cmp" but ui v2.5 lacks it)
-UI_DIR="$OFFLINE_DIR/lazy-plugins/ui"
-mkdir -p "$UI_DIR/lua/nvchad/cmp"
+    BUILD_ROOT=$(mktemp -d)
+    cd "$BUILD_ROOT"
 
-cat > "$UI_DIR/lua/nvchad/cmp/init.lua" << 'CMPEOF'
-local cmp_ui = require("nvconfig").ui.cmp
-local cmp_style = cmp_ui.style
-local format_color = require "nvchad.cmp.format"
+    git clone --depth 1 --branch stable https://github.com/neovim/neovim.git
+    cd neovim
 
-local atom_styled = cmp_style == "atom" or cmp_style == "atom_colored"
-local fields = (atom_styled or cmp_ui.icons_left) and { "kind", "abbr", "menu" } or { "abbr", "kind", "menu" }
+    # Build with Release mode, install to local prefix
+    make CMAKE_BUILD_TYPE=Release CMAKE_EXTRA_FLAGS="-DCMAKE_INSTALL_PREFIX=$BUILD_ROOT/neovim-install"
+    make install
 
-local M = {
-  formatting = {
-    format = function(entry, item)
-      local icons = require "nvchad.icons.lspkind"
-      local icon = icons[item.kind] or ""
-      local kind = item.kind or ""
+    # Copy neovim binaries and runtime
+    mkdir -p "$OFFLINE_DIR/nvim/linux-x64"
+    cp -r "$BUILD_ROOT/neovim-install"/* "$OFFLINE_DIR/nvim/linux-x64/"
 
-      if atom_styled then
-        item.menu = kind
-        item.menu_hl_group = "LineNr"
-        item.kind = " " .. icon .. " "
-      elseif cmp_ui.icons_left then
-        item.menu = kind
-        item.menu_hl_group = "CmpItemKind" .. kind
-        item.kind = icon
-      else
-        item.kind = " " .. icon .. " " .. kind
-        item.menu_hl_group = "comment"
-      end
+    # Set path to our built nvim
+    NVIM_BIN="$OFFLINE_DIR/nvim/linux-x64/bin/nvim"
 
-      if kind == "Color" and cmp_ui.format_colors.lsp then
-        format_color.lsp(entry, item, (not (atom_styled or cmp_ui.icons_left) and kind) or "")
-      end
+    echo -e "${GREEN}Neovim built successfully${NC}"
+    "$NVIM_BIN" --version | head -3
 
-      if #item.abbr > cmp_ui.abbr_maxwidth then
-        item.abbr = string.sub(item.abbr, 1, cmp_ui.abbr_maxwidth) .. "…"
-      end
+    cd "$SCRIPT_DIR"
+    rm -rf "$BUILD_ROOT"
+else
+    echo -e "${YELLOW}[1/5] Using system neovim...${NC}"
+    if ! command -v nvim &> /dev/null; then
+        echo -e "${RED}Error: neovim not found${NC}"
+        exit 1
+    fi
+    NVIM_BIN="$(which nvim)"
+    echo "Using: $NVIM_BIN"
+    "$NVIM_BIN" --version | head -1
+fi
 
-      return item
-    end,
+# ============================================
+# 2. Download LazyVim starter template
+# ============================================
+echo ""
+echo -e "${YELLOW}[2/5] Downloading LazyVim starter template...${NC}"
 
-    fields = fields,
-  },
+git clone --depth 1 https://github.com/LazyVim/starter "$OFFLINE_DIR/lazyvim-starter"
+rm -rf "$OFFLINE_DIR/lazyvim-starter/.git"
 
-  window = {
-    completion = {
-      scrollbar = false,
-      side_padding = atom_styled and 0 or 1,
-      winhighlight = "Normal:CmpPmenu,CursorLine:CmpSel,Search:None,FloatBorder:CmpBorder",
-      border = atom_styled and "none" or "single",
+# ============================================
+# 3. Pre-download all plugins using lazy.nvim
+# ============================================
+echo ""
+echo -e "${YELLOW}[3/5] Pre-downloading all plugins...${NC}"
+
+# Create isolated build environment
+BUILD_ROOT=$(mktemp -d)
+BUILD_CONFIG="$BUILD_ROOT/config/nvim"
+BUILD_DATA="$BUILD_ROOT/data"
+BUILD_STATE="$BUILD_ROOT/state"
+BUILD_CACHE="$BUILD_ROOT/cache"
+
+mkdir -p "$BUILD_CONFIG" "$BUILD_DATA" "$BUILD_STATE" "$BUILD_CACHE"
+
+# Copy starter config to build config
+cp -r "$OFFLINE_DIR/lazyvim-starter/"* "$BUILD_CONFIG/"
+
+# Create a custom init.lua that forces offline mode and disables update checks
+cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
+-- Bootstrap lazy.nvim (will use local copy if available)
+local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+if not vim.loop.fs_stat(lazypath) then
+    -- Try to use local copy from offline package
+    local offline_lazy = os.getenv("OFFLINE_LAZY_PATH")
+    if offline_lazy and vim.loop.fs_stat(offline_lazy) then
+        vim.fn.mkdir(vim.fn.fnamemodify(lazypath, ":h"), "p")
+        vim.fn.system({"cp", "-r", offline_lazy, lazypath})
+    else
+        -- Fallback: clone (should not happen in build)
+        vim.fn.system({
+            "git",
+            "clone",
+            "--filter=blob:none",
+            "https://github.com/folke/lazy.nvim.git",
+            "--branch=stable",
+            lazypath,
+        })
+    end
+end
+vim.opt.rtp:prepend(lazypath)
+
+-- Load LazyVim configuration
+require("lazyvim.config").init()
+
+-- Setup lazy.nvim with offline configuration
+require("lazy").setup({
+    spec = {
+        { "LazyVim/LazyVim", import = "lazyvim.plugins" },
+        { import = "plugins" },
     },
-
-    documentation = {
-      border = "single",
-      winhighlight = "Normal:CmpDoc,FloatBorder:CmpDocBorder",
+    defaults = {
+        lazy = false,
+        version = false, -- always use latest git commit
     },
-  },
-}
+    install = {
+        missing = true,
+        colorscheme = { "tokyonight", "habamax" },
+    },
+    checker = { enabled = false }, -- disable update checker
+    change_detection = { enabled = false },
+    performance = {
+        rtp = {
+            disabled_plugins = {
+                "gzip",
+                "matchit",
+                "matchparen",
+                "netrwPlugin",
+                "tarPlugin",
+                "tohtml",
+                "tutor",
+                "zipPlugin",
+            },
+        },
+    },
+})
 
-return M
-CMPEOF
+-- Load settings
+require("config.options")
+require("config.keymaps")
+require("config.autocmds")
+INITEOF
 
-cat > "$UI_DIR/lua/nvchad/cmp/format.lua" << 'FMTEOF'
-local M = {}
-local api = vim.api
-local cmp_ui = require("nvconfig").ui.cmp
-local icon = cmp_ui.format_colors.icon .. " "
+# Export environment variables for the build
+export XDG_CONFIG_HOME="$BUILD_ROOT/config"
+export XDG_DATA_HOME="$BUILD_ROOT/data"
+export XDG_STATE_HOME="$BUILD_ROOT/state"
+export XDG_CACHE_HOME="$BUILD_ROOT/cache"
 
-local hlcache = {}
+# First, download lazy.nvim itself
+echo "  Downloading lazy.nvim..."
+git clone --depth 1 --branch stable https://github.com/folke/lazy.nvim "$BUILD_DATA/nvim/lazy/lazy.nvim"
 
-M.lsp = function(entry, item, kind_txt)
-  local color = entry.completion_item.documentation
+# Set offline path for init.lua
+export OFFLINE_LAZY_PATH="$BUILD_DATA/nvim/lazy/lazy.nvim"
 
-  if color and type(color) == "string" and color:match "^#%x%x%x%x%x%x$" then
-    local hl = "hex-" .. color:sub(2)
+# Run nvim to download all plugins
+echo "  Starting Neovim to download all plugins..."
+echo "  (This may take several minutes...)"
 
-    if not hlcache[hl] then
-      api.nvim_set_hl(0, hl, { fg = color })
-      hlcache[hl] = true
+# Create a script to wait for lazy sync and then quit
+cat > "$BUILD_ROOT/sync.lua" << 'SYNCEOF'
+-- Wait for lazy to finish installing
+local function wait_for_install()
+    local lazy = require("lazy")
+    local start_time = vim.loop.now()
+    local timeout = 300000 -- 5 minutes timeout
+
+    while true do
+        local stats = lazy.stats()
+        -- Check if all plugins are installed
+        if stats.loaded > 0 and stats.loaded == stats.count then
+            print("All plugins loaded: " .. stats.loaded .. "/" .. stats.count)
+            break
+        end
+
+        -- Check timeout
+        if vim.loop.now() - start_time > timeout then
+            print("Timeout waiting for plugins")
+            break
+        end
+
+        vim.loop.sleep(1000)
+        vim.cmd("redraw")
+        print("Waiting for plugins... " .. (stats.loaded or 0) .. "/" .. (stats.count or "?"))
     end
 
-    item.kind = ((cmp_ui.icons_left and icon) or (" " .. icon)) .. kind_txt
-    item.kind_hl_group = hl
-    item.menu_hl_group = hl
-  end
+    -- Wait a bit more for any final operations
+    vim.defer_fn(function()
+        vim.cmd("qa!")
+    end, 3000)
 end
 
-return M
-FMTEOF
+-- Schedule the wait function
+vim.schedule(function()
+    -- First ensure all plugins are installed
+    require("lazy").sync({ wait = true })
+    wait_for_install()
+end)
+SYNCEOF
 
-# Patch nvconfig.lua: add missing cmp fields needed by nvchad.cmp module
-sed -i '/style = "default",.*atom/a\        icons_left = false,\n        abbr_maxwidth = 60,\n        format_colors = { lsp = true, icon = "󱓻" },' "$UI_DIR/lua/nvconfig.lua"
+# Run neovim to sync plugins
+"$NVIM_BIN" --headless -u "$BUILD_CONFIG/init.lua" -c "luafile $BUILD_ROOT/sync.lua" 2>&1 || true
 
-echo "  ui v2.5 patched with nvchad.cmp module"
+# Give extra time for any remaining downloads
+sleep 10
 
-# All other plugins (use default branch)
-declare -A PLUGINS=(
-    ["nvim-lua/plenary.nvim"]="plenary.nvim"
-    ["nvzone/volt"]="volt"
-    ["nvzone/menu"]="menu"
-    ["nvzone/minty"]="minty"
-    ["nvim-tree/nvim-web-devicons"]="nvim-web-devicons"
-    ["lukas-reineke/indent-blankline.nvim"]="indent-blankline.nvim"
-    ["nvim-tree/nvim-tree.lua"]="nvim-tree.lua"
-    ["folke/which-key.nvim"]="which-key.nvim"
-    ["stevearc/conform.nvim"]="conform.nvim"
-    ["lewis6991/gitsigns.nvim"]="gitsigns.nvim"
-    ["mason-org/mason.nvim"]="mason.nvim"
-    ["neovim/nvim-lspconfig"]="nvim-lspconfig"
-    ["hrsh7th/nvim-cmp"]="nvim-cmp"
-    ["L3MON4D3/LuaSnip"]="LuaSnip"
-    ["rafamadriz/friendly-snippets"]="friendly-snippets"
-    ["windwp/nvim-autopairs"]="nvim-autopairs"
-    ["saadparwaiz1/cmp_luasnip"]="cmp_luasnip"
-    ["hrsh7th/cmp-nvim-lua"]="cmp-nvim-lua"
-    ["hrsh7th/cmp-nvim-lsp"]="cmp-nvim-lsp"
-    ["hrsh7th/cmp-buffer"]="cmp-buffer"
-    ["nvim-telescope/telescope.nvim"]="telescope.nvim"
-    ["nvim-treesitter/nvim-treesitter"]="nvim-treesitter"
-)
+# Check what was downloaded
+echo ""
+echo "  Plugins downloaded:"
+if [ -d "$BUILD_DATA/nvim/lazy" ]; then
+    ls "$BUILD_DATA/nvim/lazy/" | wc -l | xargs echo "    Count:"
 
-for repo in "${!PLUGINS[@]}"; do
-    dir="${PLUGINS[$repo]}"
-    printf "  %-25s " "$dir"
-    if git clone --depth 1 "https://github.com/$repo" "$OFFLINE_DIR/lazy-plugins/$dir" 2>&1; then
-        rm -rf "$OFFLINE_DIR/lazy-plugins/$dir/.git"
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAIL${NC}"
-    fi
-done
+    # Copy all plugins to offline directory
+    for plugin_dir in "$BUILD_DATA/nvim/lazy"/*/; do
+        if [ -d "$plugin_dir" ]; then
+            plugin_name=$(basename "$plugin_dir")
+            cp -r "$plugin_dir" "$OFFLINE_DIR/lazy-plugins/"
+            # Remove .git to save space
+            rm -rf "$OFFLINE_DIR/lazy-plugins/$plugin_name/.git"
+            echo "    $plugin_name"
+        fi
+    done
+else
+    echo -e "${RED}    Warning: No plugins directory found${NC}"
+fi
 
-# cmp-async-path from codeberg
-printf "  %-25s " "cmp-async-path"
-git clone --depth 1 https://codeberg.org/FelipeLema/cmp-async-path "$OFFLINE_DIR/lazy-plugins/cmp-async-path" 2>/dev/null
-rm -rf "$OFFLINE_DIR/lazy-plugins/cmp-async-path/.git"
-echo "OK"
+# Copy LazyVim core if it was downloaded separately
+if [ -d "$BUILD_DATA/nvim/lazy/LazyVim" ]; then
+    echo "  LazyVim core copied"
+fi
+
+# Cleanup
+rm -rf "$BUILD_ROOT"
 
 # ============================================
-# 4. Build Treesitter parsers
+# 4. Build Treesitter parsers (optional)
 # ============================================
 echo ""
-echo -e "${YELLOW}[4/4] Building components...${NC}"
+echo -e "${YELLOW}[4/5] Building components...${NC}"
 
 if [ "$BUILD_TREESITTER" = true ]; then
     echo ""
     echo -e "${GREEN}Building Treesitter parsers...${NC}"
 
-    if ! command -v nvim &> /dev/null; then
-        echo -e "${RED}Error: Neovim not found. Cannot build Treesitter parsers.${NC}"
-        echo "Install Neovim or use GitHub Actions instead."
-        exit 1
-    fi
-
     PARSER_DIR="$OFFLINE_DIR/treesitter/linux-x64"
     mkdir -p "$PARSER_DIR"
 
-    # Ensure tree-sitter CLI is available (required by nvim-treesitter for compilation)
+    # Ensure tree-sitter CLI is available
     if ! command -v tree-sitter &> /dev/null; then
-        echo "  Installing tree-sitter CLI (building from source)..."
+        echo "  Installing tree-sitter CLI..."
         if ! command -v cargo &> /dev/null; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable 2>&1
             export PATH="$HOME/.cargo/bin:$PATH"
         fi
         # libclang is required by tree-sitter-cli's bindgen dependency
-        if ! dpkg -s libclang-dev &> /dev/null; then
+        if ! dpkg -s libclang-dev &> /dev/null 2>&1; then
             apt-get update && apt-get install -y libclang-dev 2>&1 || true
         fi
         cargo install tree-sitter-cli 2>&1
         echo "  $(tree-sitter --version)"
     fi
 
-    # Create a proper Neovim config directory structure
+    # Create build environment
     BUILD_ROOT=$(mktemp -d)
     BUILD_CONFIG="$BUILD_ROOT/config/nvim"
     BUILD_DATA="$BUILD_ROOT/data"
-    BUILD_STATE="$BUILD_ROOT/state"
-    BUILD_CACHE="$BUILD_ROOT/cache"
 
-    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA/nvim/site/pack/dist/start" "$BUILD_STATE" "$BUILD_CACHE"
+    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA/nvim/site/pack/dist/start"
 
-    # Copy treesitter plugin to pack directory (auto-loaded)
-    # Must be in XDG_DATA_HOME/nvim/site/pack/ for Neovim to find it
-    cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" "$BUILD_DATA/nvim/site/pack/dist/start/"
+    # Copy nvim-treesitter plugin
+    if [ -d "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" ]; then
+        cp -r "$OFFLINE_DIR/lazy-plugins/nvim-treesitter" "$BUILD_DATA/nvim/site/pack/dist/start/"
+    fi
 
-    # Create init.lua with treesitter setup
-    cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
--- Explicitly add treesitter plugin to runtimepath
+    # Create init.lua for treesitter build
+    cat > "$BUILD_CONFIG/init.lua" << 'TSEOF'
 local ts_dir = vim.env.TS_PLUGIN_DIR
 if ts_dir and ts_dir ~= "" then
     vim.opt.rtp:prepend(ts_dir)
 end
 
--- Parse the list of parsers to install
 local parser_str = vim.env.PARSERS_TO_INSTALL or ""
 local parsers = {}
 for parser in string.gmatch(parser_str, "([^,]+)") do
     table.insert(parsers, vim.trim(parser))
 end
 
--- Install after plugins are loaded
 vim.api.nvim_create_autocmd("VimEnter", {
     once = true,
     callback = function()
@@ -339,92 +386,68 @@ vim.api.nvim_create_autocmd("VimEnter", {
             print("Installing: " .. parser)
             local ok, err = pcall(vim.cmd, "TSInstall " .. parser)
             if not ok then
-                print("  Error starting: " .. tostring(err))
+                print("  Error: " .. tostring(err))
             end
         end
 
-        -- Wait for async installs to complete, then quit
-        -- TSInstall is async; 120s is enough for 12 parsers to download + compile
         vim.defer_fn(function()
             print("Install wait complete, exiting.")
             vim.cmd("q!")
         end, 120000)
     end,
 })
-INITEOF
+TSEOF
 
     echo "  Installing parsers: ${PARSERS//,/, }"
 
-    # Run Neovim with our config
     XDG_CONFIG_HOME="$BUILD_ROOT/config" \
-    XDG_DATA_HOME="$BUILD_DATA" \
-    XDG_STATE_HOME="$BUILD_STATE" \
-    XDG_CACHE_HOME="$BUILD_CACHE" \
+    XDG_DATA_HOME="$BUILD_ROOT/data" \
     PARSERS_TO_INSTALL="$PARSERS" \
     TS_PLUGIN_DIR="$BUILD_DATA/nvim/site/pack/dist/start/nvim-treesitter" \
-    nvim --headless 2>&1 || true
+    "$NVIM_BIN" --headless 2>&1 || true
 
-    # Find compiled parsers anywhere under the build tree
-    echo "  Searching for compiled parsers..."
+    # Find and copy compiled parsers
     find "$BUILD_ROOT" -name "*.so" -type f | while read -r sofile; do
-        echo "    Found: $sofile"
         cp "$sofile" "$PARSER_DIR/" 2>/dev/null || true
     done
 
-    # Count final
     FINAL_COUNT=$(ls -1 "$PARSER_DIR"/*.so 2>/dev/null | wc -l)
     if [ "$FINAL_COUNT" -gt 0 ]; then
         echo -e "  ${GREEN}Built $FINAL_COUNT parsers${NC}"
-        ls "$PARSER_DIR"/*.so | xargs -n1 basename
     else
-        echo -e "  ${RED}Error: No parsers were built${NC}"
-        echo "  Diagnostics - directory tree:"
-        find "$BUILD_ROOT" -type d | head -30
-        echo "  Check if gcc/g++ are installed"
+        echo -e "  ${YELLOW}Warning: No parsers were built${NC}"
     fi
 
     rm -rf "$BUILD_ROOT"
 fi
 
 # ============================================
-# 5. Build Mason LSP servers
+# 5. Build Mason LSP servers (optional)
 # ============================================
 
 if [ "$BUILD_MASON" = true ]; then
     echo ""
     echo -e "${GREEN}Building Mason LSP servers...${NC}"
 
-    if ! command -v nvim &> /dev/null; then
-        echo -e "${RED}Error: Neovim not found. Cannot build Mason packages.${NC}"
-        exit 1
-    fi
-
     MASON_DIR="$OFFLINE_DIR/mason"
     mkdir -p "$MASON_DIR"
 
-    # Create a proper Neovim config directory structure
     BUILD_ROOT=$(mktemp -d)
     BUILD_CONFIG="$BUILD_ROOT/config/nvim"
     BUILD_DATA="$BUILD_ROOT/data"
-    BUILD_STATE="$BUILD_ROOT/state"
-    BUILD_CACHE="$BUILD_ROOT/cache"
 
-    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA/nvim/site/pack/dist/start" "$BUILD_STATE" "$BUILD_CACHE"
+    mkdir -p "$BUILD_CONFIG" "$BUILD_DATA/nvim/site/pack/dist/start"
 
-    # Copy mason plugin to pack directory (auto-loaded)
-    cp -r "$OFFLINE_DIR/lazy-plugins/mason.nvim" "$BUILD_DATA/nvim/site/pack/dist/start/"
+    # Copy mason plugin
+    if [ -d "$OFFLINE_DIR/lazy-plugins/mason.nvim" ]; then
+        cp -r "$OFFLINE_DIR/lazy-plugins/mason.nvim" "$BUILD_DATA/nvim/site/pack/dist/start/"
+    fi
 
-    # Create init.lua with mason setup
-    cat > "$BUILD_CONFIG/init.lua" << 'INITEOF'
--- Mason is auto-loaded from data/nvim/site/pack/dist/start/
-
--- Setup mason
+    cat > "$BUILD_CONFIG/init.lua" << 'MASONEOF'
 require("mason").setup()
 
--- Install LSP servers
 local function install_lsp()
     local lsp_str = vim.env.LSP_TO_INSTALL or ""
-
     for lsp in string.gmatch(lsp_str, "([^,]+)") do
         lsp = vim.trim(lsp)
         print("Installing: " .. lsp)
@@ -432,27 +455,21 @@ local function install_lsp()
     end
 end
 
--- Run after UI is ready
 vim.defer_fn(function()
     install_lsp()
-    -- Wait for installs to complete then quit
     vim.defer_fn(function()
         vim.cmd("q!")
     end, 120000)
 end, 1000)
-INITEOF
+MASONEOF
 
     echo "  Installing LSP: ${LSP_SERVERS//,/, }"
 
-    # Run Neovim with our config
     XDG_CONFIG_HOME="$BUILD_ROOT/config" \
-    XDG_DATA_HOME="$BUILD_DATA" \
-    XDG_STATE_HOME="$BUILD_STATE" \
-    XDG_CACHE_HOME="$BUILD_CACHE" \
+    XDG_DATA_HOME="$BUILD_ROOT/data" \
     LSP_TO_INSTALL="$LSP_SERVERS" \
-    nvim --headless 2>&1 || true
+    "$NVIM_BIN" --headless 2>&1 || true
 
-    # Copy Mason packages
     if [ -d "$BUILD_DATA/nvim/mason" ]; then
         cp -rv "$BUILD_DATA/nvim/mason" "$OFFLINE_DIR/"
         echo -e "  ${GREEN}Mason LSP servers installed${NC}"
@@ -465,23 +482,37 @@ fi
 # Create archive
 # ============================================
 echo ""
-echo -e "${GREEN}Creating archive...${NC}"
+echo -e "${YELLOW}[5/5] Creating archive...${NC}"
 
 # Copy install.sh into the package
 cp "$SCRIPT_DIR/install.sh" "$OFFLINE_DIR/"
 
 cd "$SCRIPT_DIR"
-tar -czvf nvchad-offline.tar.gz nvchad-offline/
+tar -czvf lazyvim-offline.tar.gz lazyvim-offline/
 
-SIZE=$(du -h nvchad-offline.tar.gz | cut -f1)
+SIZE=$(du -h lazyvim-offline.tar.gz | cut -f1)
 
+# Summary
 echo ""
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}Build complete!${NC}"
 echo ""
-echo "  Output: $SCRIPT_DIR/nvchad-offline.tar.gz"
+echo "  Output: $SCRIPT_DIR/lazyvim-offline.tar.gz"
 echo "  Size: $SIZE"
 echo ""
+echo "  Contents:"
+echo "    - Neovim binary ($(ls "$OFFLINE_DIR/nvim/linux-x64/bin/" 2>/dev/null | head -1 || echo 'N/A'))"
+echo "    - LazyVim starter config"
+echo "    - $(ls -1 "$OFFLINE_DIR/lazy-plugins" 2>/dev/null | wc -l) plugins"
+if [ -d "$OFFLINE_DIR/treesitter" ]; then
+    echo "    - $(ls -1 "$OFFLINE_DIR/treesitter/linux-x64"/*.so 2>/dev/null | wc -l) Treesitter parsers"
+fi
+if [ -d "$OFFLINE_DIR/mason" ]; then
+    echo "    - Mason LSP servers"
+fi
+echo ""
 echo "Transfer to offline machine and run:"
+echo "  tar -xzf lazyvim-offline.tar.gz"
+echo "  cd lazyvim-offline"
 echo "  ./install.sh"
 echo -e "${GREEN}============================================${NC}"
