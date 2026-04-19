@@ -1,5 +1,5 @@
 #!/bin/bash
-# LazyVim Offline Package Builder
+# LazyVim Offline Wrapper - Builder
 # Run this script in an online environment to create the offline package
 
 set -e

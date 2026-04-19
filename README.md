@@ -1,4 +1,4 @@
-# LazyVim Offline Installer
+# LazyVim Offline Wrapper
 
 Bundle LazyVim + Neovim binary + all plugins for completely offline installation on Ubuntu 20.04/22.04.
 

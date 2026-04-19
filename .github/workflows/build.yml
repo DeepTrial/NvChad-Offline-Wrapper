@@ -97,11 +97,11 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.date.outputs.tag }}
-          name: LazyVim Offline Build ${{ steps.date.outputs.tag }}
+          name: LazyVim Offline Wrapper ${{ steps.date.outputs.tag }}
           draft: false
           files: lazyvim-offline.tar.gz
           body: |
-            ## LazyVim Offline Package
+            ## LazyVim Offline Wrapper
 
             Includes Neovim binary + LazyVim + all plugins for offline use.
 

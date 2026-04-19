@@ -1,5 +1,5 @@
 #!/bin/bash
-# LazyVim Offline Installation Script
+# LazyVim Offline Wrapper - Installer
 # Run this script from inside the extracted lazyvim-offline directory
 
 set -e
