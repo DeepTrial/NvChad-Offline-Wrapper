@@ -128,11 +128,13 @@ if [ "$BUILD_NEOVIM" = true ]; then
     echo "  Downloading from: $NVIM_RELEASE_URL"
 
     BUILD_ROOT=$(mktemp -d)
-    curl -sL "$NVIM_RELEASE_URL" -o "$BUILD_ROOT/nvim-linux64.tar.gz"
+    curl -sL "$NVIM_RELEASE_URL" -o "$BUILD_ROOT/nvim.tar.gz"
 
     # Extract and copy to offline package
-    tar -xzf "$BUILD_ROOT/nvim-linux64.tar.gz" -C "$BUILD_ROOT"
-    cp -r "$BUILD_ROOT/nvim-linux64"/* "$OFFLINE_DIR/nvim/linux-x64/"
+    tar -xzf "$BUILD_ROOT/nvim.tar.gz" -C "$BUILD_ROOT"
+    # Archive root directory name varies (e.g. nvim-linux-x86_64, nvim-linux64)
+    NVIM_EXTRACTED=$(find "$BUILD_ROOT" -maxdepth 1 -type d -name 'nvim*' | head -1)
+    cp -r "$NVIM_EXTRACTED"/* "$OFFLINE_DIR/nvim/linux-x64/"
 
     # Set path to our nvim
     NVIM_BIN="$OFFLINE_DIR/nvim/linux-x64/bin/nvim"
