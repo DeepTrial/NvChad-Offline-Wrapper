@@ -102,44 +102,36 @@ NVIM_BIN="nvim"
 # 1. Build Neovim from source (Ubuntu 20.04 compatible)
 # ============================================
 if [ "$BUILD_NEOVIM" = true ]; then
-    echo -e "${YELLOW}[1/5] Downloading Neovim...${NC}"
+    echo -e "${YELLOW}[1/5] Building Neovim from source (for glibc 2.31 compatibility)...${NC}"
 
-    # Get latest stable release URL from GitHub
-    # Try GitHub API first, fallback to scraping the releases page
-    NVIM_RELEASE_URL=$(curl -sL -H "Accept: application/vnd.github+json" https://api.github.com/repos/neovim/neovim/releases/latest 2>/dev/null | grep "browser_download_url.*linux-x86_64.tar.gz" | grep -v "appimage" | head -1 | cut -d '"' -f 4)
-
-    if [ -z "$NVIM_RELEASE_URL" ]; then
-        # Fallback: construct URL from latest tag
-        LATEST_TAG=$(curl -sL https://api.github.com/repos/neovim/neovim/releases/latest 2>/dev/null | grep '"tag_name"' | head -1 | cut -d '"' -f 4)
-        if [ -n "$LATEST_TAG" ]; then
-            NVIM_RELEASE_URL="https://github.com/neovim/neovim/releases/download/$LATEST_TAG/nvim-linux-x86_64.tar.gz"
-        fi
+    if ! command -v cmake &> /dev/null; then
+        echo -e "${RED}Error: cmake not found. Cannot build neovim.${NC}"
+        exit 1
     fi
-
-    if [ -z "$NVIM_RELEASE_URL" ]; then
-        # Last resort: hardcode a known stable version
-        # Try with verbose output for debugging
-        echo -e "${YELLOW}Debug: Attempting to query GitHub API...${NC}"
-        curl -v https://api.github.com/repos/neovim/neovim/releases/latest 2>&1 | head -20 || true
-        echo -e "${YELLOW}Warning: Could not auto-detect latest Neovim release, using v0.11.3${NC}"
-        NVIM_RELEASE_URL="https://github.com/neovim/neovim/releases/download/v0.11.3/nvim-linux-x86_64.tar.gz"
-    fi
-
-    echo "  Downloading from: $NVIM_RELEASE_URL"
 
     BUILD_ROOT=$(mktemp -d)
-    curl -sL "$NVIM_RELEASE_URL" -o "$BUILD_ROOT/nvim.tar.gz"
+    cd "$BUILD_ROOT"
 
-    # Extract and copy to offline package
-    tar -xzf "$BUILD_ROOT/nvim.tar.gz" -C "$BUILD_ROOT"
-    # Archive root directory name varies (e.g. nvim-linux-x86_64, nvim-linux64)
-    NVIM_EXTRACTED=$(find "$BUILD_ROOT" -maxdepth 1 -type d -name 'nvim*' | head -1)
-    cp -r "$NVIM_EXTRACTED"/* "$OFFLINE_DIR/nvim/linux-x64/"
+    # Clone neovim
+    git clone --depth 1 --branch stable https://github.com/neovim/neovim.git
+    cd neovim
 
-    # Set path to our nvim
+    # Build with Release mode, minimal dependencies
+    # Use all CPU cores for parallel build
+    JOBS=$(nproc 2>/dev/null || echo 4)
+    echo "  Building with $JOBS parallel jobs..."
+    make CMAKE_BUILD_TYPE=Release CMAKE_INSTALL_PREFIX="$BUILD_ROOT/install" -j"$JOBS"
+    make install
+
+    cd "$SCRIPT_DIR"
+
+    # Copy neovim binaries
+    cp -r "$BUILD_ROOT/install"/* "$OFFLINE_DIR/nvim/linux-x64/"
+
+    # Set path to our built nvim
     NVIM_BIN="$OFFLINE_DIR/nvim/linux-x64/bin/nvim"
 
-    echo -e "${GREEN}Neovim downloaded successfully${NC}"
+    echo -e "${GREEN}Neovim built successfully${NC}"
     "$NVIM_BIN" --version | head -3
 
     rm -rf "$BUILD_ROOT"

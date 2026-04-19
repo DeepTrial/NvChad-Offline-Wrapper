@@ -34,7 +34,8 @@ jobs:
           apt-get install -y \
             git curl ca-certificates \
             gcc g++ make cmake \
-            gettext unzip \
+            gettext unzip ninja-build \
+            libtool libtool-bin autoconf automake pkg-config \
             tree sudo
           rm -rf /var/lib/apt/lists/*
 
